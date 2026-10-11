@@ -126,6 +126,17 @@ FakeChunk& FakeChunk::AddPacket(std::initializer_list<uint8_t> raw) {
   return *this;
 }
 
+FakeChunk& FakeChunk::AddFragment(const std::string& payload,
+                                  uint8_t packet_flag) {
+  flags |= packet_flag;
+  uint8_t header[10];
+  uint8_t* header_end = WriteVarInt(payload.size(), header);
+  data.insert(data.end(), header, header_end);
+  data.insert(data.end(), payload.begin(), payload.end());
+  num_packets++;
+  return *this;
+}
+
 FakeChunk& FakeChunk::IncrementNumPackets() {
   num_packets++;
   return *this;
