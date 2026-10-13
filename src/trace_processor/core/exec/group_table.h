@@ -44,6 +44,22 @@ std::optional<KeyKind> LoadKeyWords(const ColumnView& column,
                                     int64_t* words,
                                     uint64_t* nulls);
 
+class ColumnBuffer;
+class GroupTable;
+
+// The type of a key column's values when read back from a GroupTable. This is
+// the column's type, except that Id becomes Uint32.
+StorageType KeyType(const ColumnView& column);
+
+// Writes key `k` of each group in `groups` into `buffer` as `type`. Returns
+// a view of the written values.
+ColumnView WriteKeys(const GroupTable& table,
+                     uint32_t k,
+                     const uint32_t* groups,
+                     uint32_t count,
+                     StorageType type,
+                     ColumnBuffer& buffer);
+
 // Hash table that assigns a number to each distinct key, in the order keys
 // are first seen. As in DuckDB's aggregate hash table, each slot stores the
 // top bits of the group's hash. Keys are only compared when those match.

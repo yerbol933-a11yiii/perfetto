@@ -30,60 +30,6 @@
 #include "src/trace_processor/core/exec/context.h"
 
 namespace perfetto::trace_processor::core::exec {
-namespace {
-
-// The output type of a key column. Id columns become Uint32.
-StorageType KeyType(const ColumnView& column) {
-  if (column.kind() == ColumnView::Kind::kSequence || column.type().Is<Id>()) {
-    return StorageType{Uint32{}};
-  }
-  return column.type();
-}
-
-template <typename T>
-void WriteValues(const GroupTable& groups,
-                 uint32_t k,
-                 uint32_t first,
-                 uint32_t count,
-                 T* out) {
-  for (uint32_t i = 0; i < count; ++i) {
-    out[i] = static_cast<T>(groups.Key(first + i, k));
-  }
-}
-
-// Writes key `k` of groups [first, first + count) into `buffer` as `type`.
-ColumnView WriteKeys(const GroupTable& groups,
-                     uint32_t k,
-                     uint32_t first,
-                     uint32_t count,
-                     StorageType type,
-                     ColumnBuffer& buffer) {
-  ColumnChunk& chunk = buffer.chunk();
-  void* data = chunk.Values<int64_t>();
-  if (type.Is<Uint32>() || type.Is<String>()) {
-    // Strings are stored as their interned id.
-    WriteValues(groups, k, first, count, static_cast<uint32_t*>(data));
-  } else if (type.Is<Int32>()) {
-    WriteValues(groups, k, first, count, static_cast<int32_t*>(data));
-  } else {
-    // Int64 values are stored as is and doubles as their bits.
-    WriteValues(groups, k, first, count, static_cast<int64_t*>(data));
-  }
-  bool nulls = false;
-  for (uint32_t i = 0; i < count && !nulls; ++i) {
-    nulls = groups.IsNull(first + i, k);
-  }
-  if (!nulls) {
-    return ColumnView::Reference(type, data);
-  }
-  chunk.validity.resize(kMaxBatchRows);
-  for (uint32_t i = 0; i < count; ++i) {
-    chunk.validity.change(i, !groups.IsNull(first + i, k));
-  }
-  return ColumnView::Reference(type, data, &chunk.validity);
-}
-
-}  // namespace
 
 HashAggregate::HashAggregate(HashAggregateSpec spec) : spec_(std::move(spec)) {
   for (const AggregateCall& call : spec_.aggregates) {
@@ -92,6 +38,7 @@ HashAggregate::HashAggregate(HashAggregateSpec spec) : spec_(std::move(spec)) {
     state_words_ += functions_.back()->state_words();
   }
 }
+
 HashAggregate::~HashAggregate() = default;
 HashAggregate::State::~State() = default;
 
@@ -186,7 +133,7 @@ bool HashAggregate::Serve(RowBatch& out, Breaker::State& state) const {
   for (uint32_t k = 0; k < spec_.key_columns.size(); ++k) {
     ColumnBuffer buffer = s.context->TakeBuffer();
     ColumnView view =
-        WriteKeys(s.groups, k, s.emitted, count, s.key_types[k], buffer);
+        WriteKeys(s.groups, k, rows, count, s.key_types[k], buffer);
     out.AddColumn(view, std::move(buffer));
   }
   uint64_t stride;

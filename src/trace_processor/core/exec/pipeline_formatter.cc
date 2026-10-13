@@ -29,6 +29,7 @@
 #include "src/trace_processor/core/exec/dataframe_scan.h"
 #include "src/trace_processor/core/exec/grouped_sort.h"
 #include "src/trace_processor/core/exec/hash_aggregate.h"
+#include "src/trace_processor/core/exec/interval_fill_gaps.h"
 #include "src/trace_processor/core/exec/interval_flatten.h"
 #include "src/trace_processor/core/exec/interval_intersect.h"
 #include "src/trace_processor/core/exec/number_groups.h"
@@ -207,6 +208,22 @@ std::string PipelineFormatter::OperatorString(const Operator& op) {
     const HashAggregateSpec& spec = static_cast<const HashAggregate&>(op).spec_;
     return "HashAggregate(keys: " + Columns(spec.key_columns) + "; " +
            Aggregates(spec.aggregates) + ")";
+  }
+  if (op.Is<IntervalFillGaps>()) {
+    const IntervalFillGapsSpec& spec =
+        static_cast<const IntervalFillGaps&>(op).spec_;
+    std::string out = "IntervalFillGaps(" + Column(spec.ts_column) + ", " +
+                      Column(spec.dur_column);
+    if (!spec.key_columns.empty()) {
+      out += ", keys: " + Columns(spec.key_columns) +
+             ", groups: " + Column(spec.group_column);
+    }
+    out += "; background: " + Column(spec.background_ts_column) + ", " +
+           Column(spec.background_dur_column);
+    if (!spec.background_key_columns.empty()) {
+      out += ", keys: " + Columns(spec.background_key_columns);
+    }
+    return out + ")";
   }
   if (op.Is<IntervalFlatten>()) {
     const IntervalFlattenSpec& spec =

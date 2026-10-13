@@ -25,6 +25,8 @@
 #include "perfetto/ext/base/murmur_hash.h"
 #include "perfetto/ext/base/utils.h"
 #include "src/trace_processor/core/common/storage_types.h"
+#include "src/trace_processor/core/exec/column_chunk.h"
+#include "src/trace_processor/core/exec/context.h"
 #include "src/trace_processor/core/exec/selection.h"
 #include "src/trace_processor/core/util/bit_vector.h"
 
@@ -260,6 +262,59 @@ void GroupTable::Clear() {
   group_rows_.clear();
   stride_ = 0;
   kinds_.clear();
+}
+
+StorageType KeyType(const ColumnView& column) {
+  if (column.kind() == ColumnView::Kind::kSequence || column.type().Is<Id>()) {
+    return StorageType{Uint32{}};
+  }
+  return column.type();
+}
+
+namespace {
+
+template <typename T>
+void WriteValues(const GroupTable& table,
+                 uint32_t k,
+                 const uint32_t* groups,
+                 uint32_t count,
+                 T* out) {
+  for (uint32_t i = 0; i < count; ++i) {
+    out[i] = static_cast<T>(table.Key(groups[i], k));
+  }
+}
+
+}  // namespace
+
+ColumnView WriteKeys(const GroupTable& table,
+                     uint32_t k,
+                     const uint32_t* groups,
+                     uint32_t count,
+                     StorageType type,
+                     ColumnBuffer& buffer) {
+  ColumnChunk& chunk = buffer.chunk();
+  void* data = chunk.Values<int64_t>();
+  if (type.Is<Uint32>() || type.Is<String>()) {
+    // Strings are stored as their interned id.
+    WriteValues(table, k, groups, count, static_cast<uint32_t*>(data));
+  } else if (type.Is<Int32>()) {
+    WriteValues(table, k, groups, count, static_cast<int32_t*>(data));
+  } else {
+    // Int64 values are stored as is and doubles as their bits.
+    WriteValues(table, k, groups, count, static_cast<int64_t*>(data));
+  }
+  bool nulls = false;
+  for (uint32_t i = 0; i < count && !nulls; ++i) {
+    nulls = table.IsNull(groups[i], k);
+  }
+  if (!nulls) {
+    return ColumnView::Reference(type, data);
+  }
+  chunk.validity.resize(kMaxBatchRows);
+  for (uint32_t i = 0; i < count; ++i) {
+    chunk.validity.change(i, !table.IsNull(groups[i], k));
+  }
+  return ColumnView::Reference(type, data, &chunk.validity);
 }
 
 }  // namespace perfetto::trace_processor::core::exec
